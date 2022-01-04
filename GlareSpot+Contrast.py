@@ -30,7 +30,7 @@ mask_im = Image.open('Contrast+Blur+Glare/glareTest.png')
 # mask_im = mask_im.convert('L')
 
 #loop to edit all original tango jpgs
-for f in os.listdir('.'):
+for f in os.listdir('Original'):
         if f.endswith('.JPG') or f.endswith('.jpg'):
             i = Image.open(f)                       #open current jpg
             fn, fext = os.path.splitext(f)          #strings of file name/type
