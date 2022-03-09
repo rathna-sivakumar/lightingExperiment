@@ -1,0 +1,9 @@
+Original Images - contain snippets of synthetic tango images from the Kelvins website (for starter images to experiement on)
+
+Grid - added an overlay of a grid onto original images, with pixel count on the side for x and y axis, so that I can easily figure out coordinates onto which I should paste images
+
+Contrast - side by side of original img and that same img with a 2x contrast applied to it, and same thing but 0.5x contrast applied to it
+
+Contrast+Blur - 3 types for each original img : 1) img with 1.5 brightness applied, 2) img with 2.0 brightness aplied, 3) img with 2.0 contrast and gaussian blur
+
+Solarized - all pixels above predetermined threshold inverted, experiment to see if it could be used for under or over exposure possibly
