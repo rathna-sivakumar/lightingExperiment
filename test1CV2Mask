@@ -1,0 +1,141 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Apr  6 11:39:04 2022
+
+@author: rathn
+"""
+
+import moderngl #problem so far
+
+from PIL import Image
+
+import json
+from scipy.spatial.transform import Rotation
+import numpy as np
+import cv2
+
+class OpenGLMaskProjector:
+    VERTEX_SHADER = '''
+        #version 330
+        in vec3 in_vert;
+        uniform mat3 projection;
+        uniform mat3 rotation;
+        uniform vec3 translation;
+        uniform int width;
+        uniform int height;
+        void main() {
+            vec3 homog = projection * ((rotation * in_vert) + translation);
+            vec2 coord = vec2(homog.x / homog.z, homog.y / homog.z);
+            vec2 ndc = vec2(coord.x / width * 2 - 1, coord.y / height * 2 - 1);
+            gl_Position = vec4(ndc, 1.0, 1.0);
+        }
+        '''
+
+    FRAGMENT_SHADER =  '''
+        #version 330
+        out vec4 color;
+        void main() {
+            color = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+        }    
+        '''
+    
+    def __init__(self, stl_path, size):
+        self.size = size
+        verts = np.fromfile(
+            stl_path,
+            dtype=np.dtype(
+                [
+                    ("norm", np.float32, [3]),
+                    ("vec", np.float32, [3, 3]),
+                    ("attr", np.uint16, [1]),
+                ]
+            ).newbyteorder("<"),
+            offset=84,
+        )["vec"].reshape(-1, 3)
+
+        ctx = moderngl.create_context(standalone=True)
+
+        self.prog = ctx.program(
+            vertex_shader=self.VERTEX_SHADER,
+            fragment_shader=self.FRAGMENT_SHADER,
+        )
+
+        self.prog["width"] = self.size
+        self.prog["height"] = self.size
+
+        vbo = ctx.buffer(verts.astype("f4").tobytes())
+        self.vao = ctx.vertex_array(self.prog, vbo, "in_vert")
+        self.fbo = ctx.simple_framebuffer((self.size, self.size))
+        self.fbo.use()
+
+    def make_mask(self, image, r_vec, t_vec, focal_length, centroid, bbox_size, imdims):
+        origin = centroid - bbox_size / 2
+        center = np.array(imdims) / 2 - origin
+        focal_length *= self.size / bbox_size
+        center *= self.size / bbox_size
+        cam_matrix = np.array(
+            [
+                [focal_length, 0, center[1]],
+                [0, focal_length, center[0]],
+                [0, 0, 1],
+            ],
+            dtype=np.float32,
+        )
+        self.prog["projection"] = tuple(cam_matrix.T.flatten())
+
+        self.prog["rotation"] = tuple(
+            Rotation.from_rotvec(r_vec.squeeze()).as_matrix().T.flatten()
+        )
+        self.prog["translation"] = tuple(t_vec)
+        self.fbo.clear(0.0, 0.0, 0.0, 1.0)
+        self.vao.render(moderngl.TRIANGLES)
+        binary_mask = np.frombuffer(self.fbo.read(), dtype=np.uint8).reshape(self.size, self.size, 3)[:, :, 0]
+        return np.where((binary_mask == 0)[..., None], -1, image)
+    
+    
+meta_path = 'meta_000059.json';
+with open(meta_path, "r") as f:
+   meta = json.load(f)
+
+pose1 = np.array(meta["pose"]) # reading in quaternion representation of pose
+r_vec1 =  Rotation.from_quat(pose1[[1, 2, 3, 0]]).as_rotvec() # converting to rotation vector
+
+t_vec1 = np.array(meta["translation"]) # reading in quaternion representation of pose
+
+xmin1 = meta['bboxes']['tango']['xmin']
+xmax1 = meta['bboxes']['tango']['xmax']
+ymin1 = meta['bboxes']['tango']['ymin']
+ymax1 = meta['bboxes']['tango']['ymax']
+
+centroid1 = np.array([(ymax1 + ymin1)//2,(xmax1 + xmin1)//2])
+bbox_size1 = int(max(xmax1 - xmin1, ymax1 - ymin1) * 1.25) // 2 * 2
+
+focal_length1 = 2988.57951638
+
+image1 = cv2.cvtColor(cv2.imread('img000059.jpg'), cv2.COLOR_BGR2RGB)
+#newsize = max(xmax1-xmin1, ymax1-ymin1)
+#image1 = image1.resize((newsize,newsize))
+
+image1 = cv2.resize(image1, (bbox_size1,bbox_size1))
+
+image2 = image1
+
+#size1 = newsize #ask how to calculate
+size1 = bbox_size1
+
+# cropped = np.zeros([bbox_size1, bbox_size1, image1.shape[-1]], dtype=np.uint8)
+
+# #cropped[otop: bbox_size - obottom, oleft: bbox_size - oright] = image[
+#  #                                                                   max(top, 0): min(bottom, height),max(left, 0): min(right, width)                                                                        ]
+
+# resized = cv2.resize(cropped, (bbox_size1, bbox_size1))
+
+mask_gen = OpenGLMaskProjector('tango_norm.stl',size1)
+        
+#mask = mask_gen.make_mask(image1, r_vec1, t_vec1, focal_length1, centroid1, newsize, image1.size)
+mask = mask_gen.make_mask(image1, r_vec1, t_vec1, focal_length1, centroid1, bbox_size1, image1.shape[:2]) 
+#cv2.imshow("mask", mask)
+
+masked = cv2.bitwise_and(image2, image2, mask=mask)
+cv2.imshow("Mask Applied to Image", masked)
+cv2.waitKey(0)
